@@ -6,10 +6,8 @@
 
 ## State
 
-Loading and parsing the module is almost done
+Loading and parsing the module is almost done, playback is next big step
 
-- [ ] Load samples
-- [ ] generate static tables
 - [ ] playback
 
 ## Credits

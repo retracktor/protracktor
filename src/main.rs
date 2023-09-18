@@ -11,6 +11,7 @@ mod tinymod {
         volume: u8,
         loop_start: usize,
         loop_len: usize,
+        data: Vec<i8>,
     }
 
     impl Sample {
@@ -31,6 +32,7 @@ mod tinymod {
             let loop_start = u16::from_be_bytes(loop_start_slice.try_into().unwrap()) as usize;
             let loop_len_slice = &sample_data[25..27];
             let loop_len = u16::from_be_bytes(loop_len_slice.try_into().unwrap()) as usize;
+            let data: Vec<i8> = Vec::new();
             Sample {
                 name,
                 length,
@@ -38,7 +40,16 @@ mod tinymod {
                 volume,
                 loop_start,
                 loop_len,
+                data,
             }
+        }
+        pub fn load_data(&mut self, pcm: &[u8]) -> usize {
+            if self.length == 0 { return 0; }
+            for byte in 1..self.length {
+
+                self.data.push(pcm[byte] as i8)
+            }
+            self.length
         }
     }
 
@@ -118,10 +129,55 @@ mod tinymod {
         pattern_count: usize,
         // sample_count: isize,
         position_count: usize,
+        p_table: Vec<Vec<i32>>,
+        vib_table: Vec<Vec<Vec<i32>>>,
     }
 
     impl ModPlayer {
         pub fn load(module: Vec<u8>) -> ModPlayer {
+
+            // generate tables
+
+            let mut p_table:Vec<Vec<i32>> = Vec::new();
+
+            for ft in 0..16 {
+                let rft:i32 = -(if ft > 8 {ft-16} else {ft});
+                let fac:f32 = (2.0_f32).powf((rft as f32) / (12.0*16.0));
+                let mut inner:Vec<i32> = Vec::new();
+                for i in 0..60 {
+                    let entry = ((BASE_P_TABLE[i] as f32) * fac * 0.5) as i32;
+                    inner.push(entry);
+                }
+                p_table.push(inner);
+            }
+
+            let mut vib_table = Vec::new();
+
+            let mut vib_0 = Vec::new();
+            let mut vib_1 = Vec::new();
+            let mut vib_2 = Vec::new();
+
+            for ampl in 0..15 {
+                let mut vib_0_inner = Vec::new();
+                let mut vib_1_inner = Vec::new();
+                let mut vib_2_inner = Vec::new();
+                let scale = (ampl as f32) + 1.5;
+                for x in 0..64 {
+                    let vib_0_entry = (scale * ((x as f32) / 32.0).sin()) as i32;
+                    vib_0_inner.push(vib_0_entry);
+                    let vib_1_entry = (scale * ((63-x) as f32 / 31.5 - 1.0)) as i32;
+                    vib_1_inner.push(vib_1_entry);
+                    let vib_2_entry = (scale * ((if x < 32 { 1.0 } else { -1.0 }))) as i32;
+                    vib_2_inner.push(vib_2_entry);
+                }
+                vib_0.push(vib_0_inner);
+                vib_1.push(vib_1_inner);
+                vib_2.push(vib_2_inner);
+            }
+            vib_table.push(vib_0);
+            vib_table.push(vib_1);
+            vib_table.push(vib_2);
+
             let mut large = false;
 
             let mut name_vec = Vec::new();
@@ -180,6 +236,13 @@ mod tinymod {
                 println!("loading pattern {}", pattern_index);
                 patterns.push(Pattern::load(&module[data_start..data_end]));
             }
+            offset += 4 * CHANNEL_COUNT + 64 * pattern_count;
+
+            for sample in samples.iter_mut() {
+                let length = sample.length;
+                println!("load PCM l: {}", length);
+                sample.load_data(&module[offset..(offset + length)]);
+            }
 
             ModPlayer {
                 name: name.to_string(),
@@ -187,6 +250,8 @@ mod tinymod {
                 samples,
                 position_count,
                 pattern_count,
+                p_table,
+                vib_table,
             }
         }
         pub fn play(self: Self) {}
