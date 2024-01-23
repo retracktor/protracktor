@@ -25,7 +25,8 @@ impl Voice {
         }
     }
 
-    fn render(&mut self, sample: &Sample, buffer: &mut [f32], samples: usize, offset: usize) {
+    fn render(&mut self, sample: &Sample, buffer: &mut [f32], samples: usize, offset: usize, stereo_factor: f32) {
+        let stereo_reverse = 1.0 - stereo_factor;
         for i in 0..samples {
             self.pos += (PAULARATE as f32 / self.period as f32) / OUTRATE as f32;
             let mut int_pos = self.pos.floor() as usize;
@@ -44,7 +45,9 @@ impl Voice {
 
             let sample_value =
                 sample.data[int_pos] as f32 * inv_fac + sample.data[next_pos] as f32 * next_fac;
-            buffer[i * 2 + offset] += (sample_value / 128.0 * (self.volume as f32 / 64.0)) * 0.5;
+
+            buffer[i * 2 + offset] += (sample_value / 128.0 * (self.volume as f32 / 64.0)) * 0.5 * stereo_factor;
+            buffer[i * 2 + offset + 1] += (sample_value / 128.0 * (self.volume as f32 / 64.0)) * 0.5 * stereo_reverse;
         }
     }
 
@@ -278,6 +281,7 @@ pub struct ModPlayer {
     cur_pos: usize,
     delay: usize,
     channels: Vec<Channel>,
+    stereo_separation: f32,
 
     voices: Vec<Voice>,
 }
@@ -418,7 +422,9 @@ impl ModPlayer {
             cur_pos: 0,
             delay: 0,
             channels,
+            stereo_separation: 0.25,
             voices: Vec::from(voices),
+
         };
 
         player.calc_tick_rate(125);
@@ -672,10 +678,6 @@ impl ModPlayer {
                             channel.volume =
                                 cmp::min(channel.volume + (channel.fx_buf[10] >> 4), 64);
                         } else {
-                            println!(
-                                "VOLSLIDE DOWN {} - {}",
-                                channel.volume as isize, channel.fx_buf[10] as isize
-                            );
                             channel.volume = cmp::max(
                                 channel.volume as isize - (channel.fx_buf[10] & 0x0F) as isize,
                                 0,
@@ -765,14 +767,18 @@ impl ModPlayer {
         for ch in 0..4 {
             let voice = &mut self.voices[ch];
             let sample_index = voice.sample;
+            let stereo_factor_on = (self.stereo_separation * 0.5) + 0.5;
+            let stereo_factor_off = 1.0 - stereo_factor_on;
+
+            //println!("stereo {} {}", stereo_factor_on, stereo_factor_off);
             match sample_index {
                 None => {}
                 Some(index) => {
                     let sample = &self.samples[index];
                     if ch == 0 || ch == 3 {
-                        voice.render(sample, out_buf, samples, offset);
+                        voice.render(sample, out_buf, samples, offset, stereo_factor_on);
                     } else {
-                        voice.render(sample, out_buf, samples, offset + 1);
+                        voice.render(sample, out_buf, samples, offset, stereo_factor_off);
                     }
                 }
             }
